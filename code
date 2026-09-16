@@ -1,0 +1,148 @@
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Swaps ISL branding for KCL in the Pinkathon 2026 Google Sites HTML export,
+ * and strips the volunteer sign-up block.
+ *
+ * <p>Build and run:
+ * <pre>
+ *   javac RebrandPinkathon.java
+ *   java RebrandPinkathon pinkathon.html
+ * </pre>
+ *
+ * <p>The original file is copied to {@code &lt;file&gt;.bak} before anything is written.
+ * Set {@link #KCL_LOGO} and {@link #KCL_BANNER} first.
+ */
+public final class RebrandPinkathon {
+
+    // ------------------------------------------------------------ image URLs
+    /** Replace with a real, publicly reachable image URL. */
+    private static final String KCL_LOGO = "PUT_KCL_LOGO_URL_HERE";
+    /** Replace with a real, publicly reachable image URL. */
+    private static final String KCL_BANNER = "PUT_KCL_BANNER_URL_HERE";
+
+    // Leading fragments of the existing Google Sites image URLs, so the full
+    // 300-character tokens don't have to be pasted in.
+    private static final String LOGO_IMG      = "AMxu72vi07z5VQZ87Om"; // nav logo, og:image, itemprop
+    private static final String BANNER_IMG    = "AMxu72s9CD7d8U59";    // header background
+    private static final String CONTENT_IMG_1 = "AMxu72ugm8JMC0Y2";    // "About the Event" photo
+    private static final String CONTENT_IMG_2 = "AMxu72up505ToqkA";    // "Key Details" photo
+    private static final String SPONSOR_IMG_1 = "AMxu72tMQeiINaGH";    // sponsor logo 1
+    private static final String SPONSOR_IMG_2 = "AMxu72u9rgeEqUvj";    // sponsor logo 2
+
+    // ----------------------------------------------------------- new content
+    private static final String NEW_SCHOOL_NAME = "King&#39;s College Latvia";
+
+    private static final String NEW_ADDRESS =
+            "Turaidas iela 1, Piņķi, Babītes pagasts, Mārupes novads, LV-2107";
+
+    private static final String NEW_MAPS_PIN =
+            "https://www.google.com/maps/place//data=!4m2!3m1!1s0x46eedb6fbaa6929d:"
+            + "0x263c3cdd228479fd?sa=X&amp;ved=1t:8290&amp;ictx=111";
+
+    private static final String NEW_REG_FORM =
+            "https://docs.google.com/forms/d/e/"
+            + "1FAIpQLSfFHm9mPZ4IlkhXcGw3oEYunvEsqf10l6VBBVds43YuzDIc3w/viewform?usp=header";
+
+    private static final String OLD_MAPS_PIN = "https://maps.app.goo.gl/5BGfL2VwvcM8sMA59";
+    private static final String OLD_REG_FORM_ID =
+            "1FAIpQLSetNU7AqEhEkPy94ZiJX57B32gU0ORQ_Las8w9MuKhZQvUD4A";
+
+    /** Anchor id of the heading that holds the "Want to volunteer?" line. */
+    private static final String VOLUNTEER_ANCHOR = "h.9mx5j0furxij";
+
+    private RebrandPinkathon() {
+    }
+
+    public static void main(String[] args) throws IOException {
+        if (args.length != 1) {
+            System.err.println("usage: java RebrandPinkathon <file.html>");
+            System.exit(2);
+        }
+
+        Path path = Paths.get(args[0]);
+        String html = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        Files.write(Paths.get(path.toString() + ".bak"), html.getBytes(StandardCharsets.UTF_8));
+
+        html = rewriteText(html);
+        html = removeVolunteerBlock(html);
+        html = swapImages(html);
+
+        Files.write(path, html.getBytes(StandardCharsets.UTF_8));
+        reportLeftovers(html);
+        System.out.println("done — backup at " + path + ".bak");
+    }
+
+    /** Plain string swaps: domain, email, school name, address, map pin, form link. */
+    private static String rewriteText(String html) {
+        Map<String, String> swaps = new LinkedHashMap<>();
+        swaps.put("isl.edu.lv/pinkathon", "kcl.edu.lv/pinkathon");
+        swaps.put("data-domain=\"isl.edu.lv\"", "data-domain=\"kcl.edu.lv\"");
+        swaps.put("ssolovey27@isl.edu.lv", "ssolovey27@kcl.edu.lv");
+        swaps.put("International School Of Latvia", NEW_SCHOOL_NAME);
+        swaps.put("Meistaru iela 2, Piņķi, Babītes pagasts, Mārupes novads", NEW_ADDRESS);
+        swaps.put(OLD_MAPS_PIN, NEW_MAPS_PIN);
+
+        for (Map.Entry<String, String> e : swaps.entrySet()) {
+            html = html.replace(e.getKey(), e.getValue());
+        }
+
+        Pattern oldForm = Pattern.compile(
+                "https://docs\\.google\\.com/forms/d/e/"
+                + Pattern.quote(OLD_REG_FORM_ID)
+                + "/viewform\\?usp=publish-editor");
+        return oldForm.matcher(html).replaceAll(Matcher.quoteReplacement(NEW_REG_FORM));
+    }
+
+    /**
+     * Deletes the volunteer heading outright: the empty anchor div plus the
+     * {@code <h2>} that follows it, up to and including its closing tag.
+     */
+    private static String removeVolunteerBlock(String html) {
+        Pattern block = Pattern.compile(
+                "<div id=\"" + Pattern.quote(VOLUNTEER_ANCHOR) + "\".*?</h2>",
+                Pattern.DOTALL);
+        Matcher m = block.matcher(html);
+        if (!m.find()) {
+            System.out.println("note: volunteer block not found — already removed?");
+            return html;
+        }
+        return m.replaceFirst("");
+    }
+
+    private static String swapImages(String html) {
+        html = swapImage(html, LOGO_IMG, KCL_LOGO);
+        html = swapImage(html, BANNER_IMG, KCL_BANNER);
+        // Uncomment whichever of these actually show ISL branding:
+        // html = swapImage(html, CONTENT_IMG_1, KCL_LOGO);
+        // html = swapImage(html, CONTENT_IMG_2, KCL_LOGO);
+        // html = swapImage(html, SPONSOR_IMG_1, KCL_LOGO);
+        // html = swapImage(html, SPONSOR_IMG_2, KCL_LOGO);
+        return html;
+    }
+
+    /** Replaces every Google Sites image URL containing {@code token}. */
+    private static String swapImage(String html, String token, String newUrl) {
+        Pattern p = Pattern.compile(
+                "https://sites\\.google\\.com/sitesv-images-rt/"
+                + Pattern.quote(token) + "[^\"')\\s]*");
+        return p.matcher(html).replaceAll(Matcher.quoteReplacement(newUrl));
+    }
+
+    private static void reportLeftovers(String html) {
+        String lower = html.toLowerCase();
+        for (String needle : new String[] {"isl.edu.lv", "international school", "meistaru", "volunteer"}) {
+            if (lower.contains(needle)) {
+                System.out.println("still present, check manually: " + needle);
+            }
+        }
+    }
+}
